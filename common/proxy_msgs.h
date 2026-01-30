@@ -81,12 +81,13 @@ typedef enum {
    CMD_ERR_TIMEOUT,
    CMD_ERR_BUSY,
    CMD_ERR_FAILED,
+   CMD_ERR_MORE,
    CMD_ERR_LAST
 } Rcodes;
 
 #define CMD_ERR_STRINGS \
    "OK","UNKNOWN_CMD", "INVALID_ARG","CRC_ERR","INTERNAL","ERR_BUF_OVFL",\
-   "TIMEOUT","BUSY","_FAILED"
+   "TIMEOUT","BUSY","FAILED","MORE"
 
 // CMD_EPD argument
 #define EPD_FLG_SEND_RD       0x01  // Send data read

@@ -1011,8 +1011,9 @@ AsyncMsg *Wait4Response(uint8_t Cmd,int Timeout)
             LOG("Received %d byte message:\n",pMsg->MsgLen);
             DumpHex(pMsg->Msg,pMsg->MsgLen);
          }
-         if(pMsg->Msg[1] != 0) {
-            printf("%s returned %s.\n",Cmd2Str(Cmd),Rcode2Str(pMsg->Msg[1]));
+         uint8_t Rcode = pMsg->Msg[1];
+         if(IsError(Rcode)) {
+            printf("%s returned %s.\n",Cmd2Str(Cmd),Rcode2Str(Rcode));
             free(pMsg);
             pMsg = NULL;
          }
@@ -1024,16 +1025,6 @@ AsyncMsg *Wait4Response(uint8_t Cmd,int Timeout)
    } while(true);
 
    return pMsg;
-}
-
-AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout)
-{
-   AsyncMsg *pResp = NULL;
-
-   if(SendAsyncMsg(Cmd,MsgLen) == 0) {
-      pResp = Wait4Response(Cmd[0],Timeout);
-   }
-   return (AsyncResp *) pResp;
 }
 
 bool SendSerialData(uint8_t *Buf,int Len)

@@ -51,6 +51,7 @@ const char *Rcode2Str(uint8_t Rcode);
 const char *Cmd2Str(uint8_t Cmd);
 int HelpCmd(char *CmdLine);
 void HandleCmd(uint8_t *Msg,int MsgLen);
+bool IsError(uint8_t Rcode);
 
 #endif   // _CMDS_H_
 

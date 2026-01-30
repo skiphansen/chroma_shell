@@ -166,6 +166,7 @@ int sfdp_dump(uint32_t *buf,int sz,bool bSilent);
 int GetEEPROM_Id(bool bSilent);
 int EpdSetPins(uint8_t Enable,uint8_t Reset,uint8_t DC,uint8_t CS,uint8_t CS1);
 void DisplayElapsedTime(const char *Msg);
+AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout);
 
 // Eventual CC1101 API functions.  
 // Function names based on https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -827,7 +828,6 @@ const BoardInfo gBoardInfo[] = {
 };
 
 const BoardInfo *gBoard;
-
 
 const char *Cmd2Str(uint8_t Cmd)
 {
@@ -1667,12 +1667,11 @@ int RadioCfgCmd(char *CmdLine)
    return Ret;
 }
 
-
 void HandleResp(uint8_t *Msg,int MsgLen)
 {
    uint8_t Cmd = Msg[0] & ~CMD_RESP;
 
-   if(Msg[1] != 0) {
+   if(IsError(Msg[1])) {
       ELOG("Command %s returned %s\n",Cmd2Str(Cmd),Rcode2Str(Msg[1]));
    }
    else {
@@ -3419,6 +3418,92 @@ int EpdSetCS(uint8_t CS,uint8_t CS1)
 {
    EPD_LOG("CS <- %d, CS1 <- %d\n",CS,CS1);
    return EpdSetPins(0xff,0xff,0xff,CS,CS1);
+}
+
+bool IsError(uint8_t Rcode)
+{
+   bool Ret = false;
+   if(Rcode != CMD_ERR_NONE && Rcode != CMD_ERR_MORE) {
+      Ret = true;
+   }
+   return Ret;
+}
+
+AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout)
+{
+   AsyncMsg *pHead = NULL;
+   AsyncMsg *pTail;
+   AsyncMsg *pMsg;
+   uint8_t Err;
+   uint8_t SeqNr = 0;
+   int DataLen = 0;
+   AsyncResp *pResp = NULL;
+
+   if(SendAsyncMsg(Cmd,MsgLen) == 0) do {
+      if((pMsg = Wait4Response(Cmd[0],Timeout)) == NULL) {
+      // Timeout
+         break;
+      }
+
+      if(pHead == NULL) {
+         pHead = pMsg;
+      }
+      else {
+         pTail->Link = pMsg;
+      }
+      pTail = pMsg;
+
+      if(!IsError(Err = pMsg->Msg[1])) {
+         if(Err == CMD_ERR_MORE) {
+         // Check the sequence number in the first bytes of the payload
+            if(pMsg->Msg[2] != SeqNr) {
+               LOG("Sequence error: got %d, expected %d\n",pMsg->Msg[0],SeqNr);
+               break;
+            }
+            SeqNr++;
+         }
+         DataLen += pMsg->MsgLen - 3;
+      }
+   } while(Err == CMD_ERR_MORE);
+
+   if(pHead != NULL) do {
+      if(pHead->Link == NULL) {
+      // Only one message was received, return it
+         pResp = (AsyncResp *) pHead;
+         pHead = NULL;
+      }
+      else {
+      // one more more messages received, consolidate them
+         int BytesCopied = 0;
+
+         pMsg = pHead;
+         if(Err != CMD_ERR_NONE) {
+         // Toss the data on error
+            DataLen = 0;
+         }
+         if((pResp = (AsyncResp *) malloc(sizeof(AsyncResp) + DataLen)) == NULL) {
+            break;
+         }
+         pResp->MsgLen = 2 + DataLen;
+      // use Rcode from the last message
+         pResp->RespCmd = pTail->Msg[0];
+         pResp->Err = pTail->Msg[1];
+
+         while(DataLen > BytesCopied) {
+            memcpy(&pResp->Msg[BytesCopied],&pMsg->Msg[3],pMsg->MsgLen - 3);
+            BytesCopied += pMsg->MsgLen - 3;
+            pHead = pMsg->Link;
+            pMsg = pHead;
+         }
+      }
+   } while(false);
+
+   while((pMsg = pHead) != NULL) {
+      pHead = pMsg->Link;
+      free(pMsg);
+   }
+
+   return pResp;
 }
 
 void Usage()
