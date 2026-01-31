@@ -63,13 +63,15 @@
 #define CMD_READ_SFDP      0x16
 #define CMD_EEPROM_PD      0x17
 #define CMD_EPD_RW_SIGS    0x18
-#define CMD_LAST           CMD_EPD_RW_SIGS
+#define CMD_EPD_READ       0x19
+#define CMD_LAST           CMD_EPD_READ
 
 #define CMD_STRINGS \
    "NOP", "PEEK", "POKE","POKE_REG","STATUS","RFMODE","RESET","EEPROM_RD" ,\
    "EEPROM_WR","EEPROM_LEN","COMM_BUF_LEN","BOARD_TYPE","SET_RF_REGS",\
    "GET_RF_REGS","SET_RF_MODE","RX_DATA","TX_DATA","EPD","PORT_RW",\
-   "EEPROM_ERASE","EEPROM_ID","READ_SFDP","EEPROM_PD","EPD_RW_SIGS"
+   "EEPROM_ERASE","EEPROM_ID","READ_SFDP","EEPROM_PD","EPD_RW_SIGS", \
+   "EPD_READ"
 
 typedef enum {
    CMD_ERR_NONE,
@@ -105,6 +107,27 @@ typedef enum {
                               | EPD_FLG_END_XFER \
                               | EPD_FLG_RESET)
 
-#endif   // _PROXY_MSGS_H_
+// CMD_EPD_RW_SIGS: 
+//    0,1 = set signal as specified, 0xff = don't set signal
+typedef struct {
+   uint8_t Cmd;      // CMD_EPD_RW_SIGS
+   uint8_t Enable;
+   uint8_t Reset;
+   uint8_t DC;
+   uint8_t CS0;
+   uint8_t CS1;
+} EpdRwSigsCmd;
 
+typedef struct {
+   uint8_t Cmd;      // CMD_EPD_RW_SIGS | CMD_RESP
+   uint8_t ErrCode;
+   uint8_t Enable;
+   uint8_t Reset;
+   uint8_t DC;
+   uint8_t CS0;
+   uint8_t CS1;
+   uint8_t Busy;
+} EpdRwSigsResp;
+
+#endif   // _PROXY_MSGS_H_
 

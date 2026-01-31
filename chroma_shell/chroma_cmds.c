@@ -167,6 +167,7 @@ int GetEEPROM_Id(bool bSilent);
 int EpdSetPins(uint8_t Enable,uint8_t Reset,uint8_t DC,uint8_t CS,uint8_t CS1);
 void DisplayElapsedTime(const char *Msg);
 AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout);
+void DumpOTP_97_BWRY(void);
 
 // Eventual CC1101 API functions.  
 // Function names based on https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -1380,11 +1381,15 @@ void EpdTestBWR_9_7(char *CmdLine);
 
 int EpdTestCmd(char *CmdLine)
 {
+#if 0
    printf("Updating display ...");
    fflush(stdout);
    DisplayElapsedTime(NULL);
    EpdTestBWR_9_7(CmdLine);
    DisplayElapsedTime("\nDisplay update took ");
+#else
+   DumpOTP_97_BWRY();
+#endif
 
    return RESULT_OK;
 }
@@ -2763,7 +2768,7 @@ int EpdBusyWait(int State,int Timeout)
 // supported for backwards compatibility with older Proxies
    bool bUseNewCommand = true;   
 
-   memset(NewCmd,0xff,sizeof(Cmd));
+   memset(NewCmd,0xff,sizeof(NewCmd));
    NewCmd[0] = CMD_EPD_RW_SIGS;
 
    while(true) {
@@ -2801,7 +2806,7 @@ int EpdBusyWait(int State,int Timeout)
       if(Busy == State) {
          Ret = RESULT_OK;
          if(!bFirst) {
-            LOG_RAW("\nBusy when %s\n",State ? "high" : "low");
+            LOG_RAW("\nBusy went %s\n",State ? "high" : "low");
          }
          break;
       }
@@ -3504,6 +3509,159 @@ AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout)
    }
 
    return pResp;
+}
+
+#define OTP_LEN_97_BWRY    112
+
+// return 0 on success
+int GetOTP_97_BWRY(uint8_t *OtpBuf)
+{
+// 1.6 Read OTP memory mapping data
+   uint16_t _chipId;
+   AsyncResp *pMsg = NULL;
+   _chipId = 0x0d04;
+   uint8_t Cmd[30];
+   int CmdLen;
+   int Ret = 1;   // Assume the worse
+
+   do {
+      EpdSetCS(HIGH,HIGH);
+      EpdSetEnable(LOW);   // turn on power
+      delay(20);
+      EpdSetReset(HIGH);
+      delay(10);
+      EpdSetReset(LOW);
+      delay(20);
+      EpdSetReset(HIGH);
+      delay(10);
+      EpdBusyWait(1,0);
+
+      Cmd[0] = CMD_EPD;
+      Cmd[1] = EPD_FLG_DEFAULT;
+      Cmd[2] = 1;
+      Cmd[3] = 0x70;
+      if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+      free(pMsg);
+      delay(8);
+
+      uint16_t ui16;
+
+      Cmd[0] = CMD_EPD_READ;
+      Cmd[1] = EPD_FLG_DEFAULT;
+      Cmd[2] = 2;
+      Cmd[3] = 0;
+      if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+
+      ui16 = (pMsg->Msg[0] << 8) | pMsg->Msg[1];
+      if (ui16 == _chipId) {
+         printf("OTP check 1 passed - Chip ID 0x%04x as expected\n", ui16);
+      }
+      else {
+         printf("OTP check 1 failed - Chip ID 0x%04x, expected 0x%04x\n",
+                ui16,_chipId);
+         break;
+      }
+      free(pMsg);
+
+      Cmd[0] = CMD_EPD;
+      Cmd[1] = EPD_FLG_DEFAULT;
+      Cmd[2] = 1;
+      Cmd[3] = 0x90;
+      if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+      free(pMsg);
+      delay(8);
+
+   // Sets the OTP read start address
+      CmdLen = 0;
+      Cmd[CmdLen++] = CMD_EPD;
+      Cmd[CmdLen++] = EPD_FLG_DEFAULT;
+      Cmd[CmdLen++] = 6;
+      Cmd[CmdLen++] = 0xa2;
+      Cmd[CmdLen++] = 0x00;
+      Cmd[CmdLen++] = 0x15;   // address 0x001500
+      Cmd[CmdLen++] = 0x00;
+      Cmd[CmdLen++] = 0x00;
+      Cmd[CmdLen++] = 0xe0;   // = 112 * 2 two banks of 112 bytes
+
+      if((pMsg = SendCmd(Cmd,CmdLen,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+      free(pMsg);
+
+      EpdBusyWait(1,0);
+
+      CmdLen = 2;
+      Cmd[CmdLen++] = 1;
+      Cmd[CmdLen++] = 0x92;
+
+      if((pMsg = SendCmd(Cmd,CmdLen,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+      free(pMsg);
+
+   // Read and ignore dummy byte
+      Cmd[0] = CMD_EPD_READ;
+      Cmd[1] = EPD_FLG_DEFAULT;
+      Cmd[2] = 1;
+      Cmd[3] = 0;
+      if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+
+// Read 112 bytes of OTP data
+      Cmd[0] = CMD_EPD_READ;
+      Cmd[1] = EPD_FLG_DEFAULT;
+      Cmd[2] = OTP_LEN_97_BWRY;
+      Cmd[3] = 0;
+      if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+         break;
+      }
+
+      if(pMsg->Msg[0] != 0xa5) {
+      // Not in page 0, try page 1
+         printf("Page 0 data ignored\n");
+
+         free(pMsg);
+         if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+            break;
+         }
+      }
+
+      if(pMsg->Msg[0] != 0xa5) {
+         printf("Error: OTP data not found in page 0 or 1\n");
+      }
+      else {
+         if(OtpBuf != NULL) {
+            memcpy(OtpBuf,pMsg->Msg,112);
+            Ret = 0;
+         }
+      }
+   } while (false);
+
+   if(pMsg != NULL) {
+      free(pMsg);
+   }
+
+   return Ret;
+}
+
+void DumpOTP_97_BWRY()
+{
+   uint8_t OtpBuf[OTP_LEN_97_BWRY];
+   int Err;
+   if((Err = GetOTP_97_BWRY(OtpBuf))) {
+      printf("GetOTP_97_BWRY failed %d\n",Err);
+   }
+   else {
+      printf("Otp contents:\n");
+      DumpHex(OtpBuf,sizeof(OtpBuf));
+   }
 }
 
 void Usage()
