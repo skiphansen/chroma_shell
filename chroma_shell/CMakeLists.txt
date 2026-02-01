@@ -13,7 +13,8 @@ set(CMAKE_C_FLAGS "-std=gnu99 -Wall -MD")
 
 set(RF_CAT_INCLUDE ../firmware/rfcat/include)
 set(COMMON ../common)
-set(LARGE_BWR test_large_bwr)
+set(LARGE_BWR E2969JS0B1)
+set(LARGE_BWRY E2969QS0B1)
 set(BB_EPAPER ../bb_epaper/src)
 
 add_compile_options(-DPROXY)
@@ -37,6 +38,8 @@ else()
       jep106.c
       ${LARGE_BWR}/test_large_bwr.cpp
       ${LARGE_BWR}/EPD_Driver.cpp
+      ${LARGE_BWRY}/Pervasive_BWRY_Large.cpp
+      ${LARGE_BWRY}/test_large_bwry.cpp
    )
 endif(COBS_TEST)
 
