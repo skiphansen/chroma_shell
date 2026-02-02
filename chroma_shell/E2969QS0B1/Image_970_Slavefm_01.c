@@ -1,4 +1,4 @@
-unsigned char const Image_970_Slavefm_01[] =
+static unsigned char Image_970_Slavefm_01[] =
 {
     //Image name: 970-2.bmp ; Width: 480 Height: 672
     //----------Image BWRY----------

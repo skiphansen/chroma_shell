@@ -1382,12 +1382,10 @@ void EpdTestBWRY_9_7(char *CmdLine);
 
 int EpdTestCmd(char *CmdLine)
 {
-   printf("Updating display ...");
-   fflush(stdout);
    DisplayElapsedTime(NULL);
 //   EpdTestBWR_9_7(CmdLine);
    EpdTestBWRY_9_7(CmdLine);
-   DisplayElapsedTime("\nDisplay update took ");
+   DisplayElapsedTime("Test took ");
 
    return RESULT_OK;
 }
@@ -3556,11 +3554,11 @@ int GetOTP_97_BWRY(uint8_t *OtpBuf)
 
       ui16 = (pMsg->Msg[0] << 8) | pMsg->Msg[1];
       if (ui16 == _chipId) {
-         printf("OTP check 1 passed - Chip ID 0x%04x as expected\n", ui16);
+         printf("Chip ID is correct (0x%04x)\n", ui16);
       }
       else {
-         printf("OTP check 1 failed - Chip ID 0x%04x, expected 0x%04x\n",
-                ui16,_chipId);
+         printf("Chip ID check failed, expected 0x%04x got 0x%04x\n",
+                _chipId,ui16);
          break;
       }
       free(pMsg);
