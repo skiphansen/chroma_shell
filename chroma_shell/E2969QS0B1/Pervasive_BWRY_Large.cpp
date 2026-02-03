@@ -12,11 +12,11 @@
 //
 // Release 904: Added new driver library
 //
-
 // Header
 #include "Pervasive_BWRY_Large.h"
 
 #ifdef PROXY
+#include "proxy_msgs.h"
 #endif
 
 //
@@ -182,7 +182,7 @@ void Pervasive_BWRY_Large::COG_getDataOTP()
 
 void Pervasive_BWRY_Large::COG_initial()
 {
-    b_sendCommandDataSelect8(0xe6, 0x19, PANEL_CS_BOTH); //	25 C temp
+    b_sendCommandDataSelect8(0xe6, 0x19, PANEL_CS_BOTH); // 25 C temp
     b_sendCommandDataSelect8(0xe0, 0x02, PANEL_CS_BOTH); //
 
     switch (u_eScreen_EPD)
@@ -225,12 +225,37 @@ void Pervasive_BWRY_Large::COG_initial()
     b_sendCommandDataSelect8(0xe9, 0x01, PANEL_CS_BOTH); //
 }
 
+extern "C" void SendEpdData(uint8_t EpdCmd,uint8_t Flags,const uint8_t *pData, uint32_t DataBytes);
+
 void Pervasive_BWRY_Large::COG_sendImageDataNormal(FRAMEBUFFER_CONST_TYPE masterFrame, FRAMEBUFFER_CONST_TYPE slaveFrame, uint32_t sizeFrame) // First frame, blackBuffer
 {
-    // Application note § 4. Input image to the EPD
-    b_sendIndexDataSelect(0x10, masterFrame, sizeFrame, PANEL_CS_MASTER); // First frame, blackBuffer
+   int y;
+// Test for sending one line at a time
 
-    b_sendIndexDataSelect(0x10, slaveFrame, sizeFrame, PANEL_CS_SLAVE); // First frame, blackBuffer
+   uint8_t Flags = EPD_FLG_DEFAULT;
+   Flags |= EPD_FLG_CS1;
+//    Flags &= ~EPD_FLG_END_XFER;
+
+// Send refresh command to master and slave
+   SendEpdData(0x10,Flags,NULL,0);  
+   Flags &= ~EPD_FLG_CMD;
+// master controller handles left side of display, 480 x 672
+// slave controller handles right side of display, 480 x 672
+// 480 pixels/line / (4 pixels/byte) = 120 bytes per line / controller
+   int xIncrement = 480 / 4;  // byte address increase for each line of y
+
+   for(y = 0; y < 672; y++) {
+      Flags &= ~EPD_FLG_CS1;
+      Flags |= EPD_FLG_CS;
+   // Send data to master
+      SendEpdData(0,Flags,&masterFrame[y * xIncrement],xIncrement);
+
+      Flags &= ~EPD_FLG_CS;
+      Flags |= EPD_FLG_CS1;
+      SendEpdData(0,Flags,&slaveFrame[y * xIncrement],xIncrement);
+   }
+
+   EpdSetCS(HIGH,HIGH);
 }
 
 void Pervasive_BWRY_Large::COG_update()

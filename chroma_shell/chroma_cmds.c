@@ -3287,11 +3287,15 @@ void SendEpdData(uint8_t EpdCmd,uint8_t Flags,const uint8_t *pData, uint32_t Dat
    #define OVERHEAD_BYTES  3  // (CMD_EPD + Flags + data count)
    uint8_t Cmd[MAX_FRAME_IO_LEN];
    AsyncResp *pMsg;
-   int TotaDatalBytes = 1 + DataBytes;  // include EPD command byte
+   int TotaDatalBytes = DataBytes;
    int Bytes2Send;
    int DataBytes2Send;
    int DataBytesSent = 0;
    int CmdLen;
+
+   if(Flags & EPD_FLG_CMD) {
+      TotaDatalBytes++; // include EPD command byte
+   }
 
    memset(Cmd,0,sizeof(Cmd));
 // Cmd format: opcode + Flags + data count + epd data
@@ -3307,7 +3311,7 @@ void SendEpdData(uint8_t EpdCmd,uint8_t Flags,const uint8_t *pData, uint32_t Dat
       DataBytes2Send = Bytes2Send - OVERHEAD_BYTES;
       Cmd[2] = DataBytes2Send;
       CmdLen = OVERHEAD_BYTES;
-      if(DataBytesSent == 0) {
+      if(DataBytesSent == 0 && (Flags & EPD_FLG_CMD)) {
       // first message, prepend EPD command to data
          Cmd[CmdLen++] = EpdCmd;
          DataBytesSent++;
@@ -3325,7 +3329,7 @@ void SendEpdData(uint8_t EpdCmd,uint8_t Flags,const uint8_t *pData, uint32_t Dat
          DataBytesSent += DataBytes2Send;
       }
 
-      if(DataBytesSent == TotaDatalBytes) {
+      if(DataBytesSent == TotaDatalBytes && (Flags & EPD_FLG_END_XFER)) {
       // Last frame, end the transfer
          Cmd[1] |= EPD_FLG_END_XFER;
       }
