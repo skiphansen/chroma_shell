@@ -30,7 +30,7 @@ void loop()
 
 extern "C" {
 
-Pervasive_BWRY_Large myDriver(eScreen_EPD_969_QS_0B);
+static Pervasive_BWRY_Large myDriver(eScreen_EPD_969_QS_0B);
 
 // There are 2-bit data per pixel to define 4 colors.
 

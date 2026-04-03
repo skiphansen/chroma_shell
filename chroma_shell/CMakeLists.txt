@@ -15,6 +15,7 @@ set(RF_CAT_INCLUDE ../firmware/rfcat/include)
 set(COMMON ../common)
 set(LARGE_BWR E2969JS0B1)
 set(LARGE_BWRY E2969QS0B1)
+set(MEDIUM_BWRY E2741QS0B3)
 set(BB_EPAPER ../bb_epaper/src)
 
 add_compile_options(-DPROXY)
@@ -40,6 +41,8 @@ else()
       ${LARGE_BWR}/EPD_Driver.cpp
       ${LARGE_BWRY}/Pervasive_BWRY_Large.cpp
       ${LARGE_BWRY}/test_large_bwry.cpp
+      ${MEDIUM_BWRY}/Pervasive_BWRY_Medium.cpp
+      ${MEDIUM_BWRY}/test_7_4_bwry.cpp
    )
 endif(COBS_TEST)
 

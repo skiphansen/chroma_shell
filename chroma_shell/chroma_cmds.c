@@ -51,6 +51,7 @@
 char *gSn;
 ChromaType gChromaType;
 uint32_t gEEPROM_Len;
+bool gLogPins;
 
 #define DEFAULT_TO   100
 
@@ -143,6 +144,7 @@ int EEPROM_BackupCmd(char *CmdLine);
 int EEPROM_Erase(char *CmdLine);
 int EEPROM_IdCmd(char *CmdLine);
 int EpdTestCmd(char *CmdLine);
+int EpdPinsCmd(char *CmdLine);
 int EEPROM_RestoreCmd(char *CmdLine);
 int DumpLutCmd(char *CmdLine);
 int DumpRfRegsCmd(char *CmdLine);
@@ -168,6 +170,11 @@ int EpdSetPins(uint8_t Enable,uint8_t Reset,uint8_t DC,uint8_t CS,uint8_t CS1);
 void DisplayElapsedTime(const char *Msg);
 AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout);
 void DumpOTP_97_BWRY(void);
+static void UpdateCRC(uint8_t data,uint16_t *pCrc);
+int EpdSetEnable(uint8_t Enable);
+int EpdSetReset(uint8_t Reset);
+int EpdSetDC(uint8_t DC);
+int EpdSetCS(uint8_t CS,uint8_t CS1);
 
 // Eventual CC1101 API functions.  
 // Function names based on https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -189,6 +196,7 @@ struct COMMAND_TABLE commandtable[] = {
    { "ee_id", "Display EEPROM manufacture and device IDs",NULL,0,EEPROM_IdCmd},
    { "ee_restore", "Read EEPROM data from a file","<path>",0,EEPROM_RestoreCmd},
    { "epd_test", "Send test image to EPD",NULL,0,EpdTestCmd},
+   { "epd_pins", "read/write EPD control pins",NULL,0,EpdPinsCmd},
    { "get_sn", "Read SN from flash or file","[<path>]",0,GetSnCmd},
    { "ping",  "Send a ping",NULL,0,PingCmd},
    { "radio_config", "Set radio configuration",NULL,0,RadioCfgCmd},
@@ -1378,16 +1386,61 @@ int EEPROM_RestoreCmd(char *CmdLine)
 
 void EpdTestBWR_9_7(char *CmdLine);
 void EpdTestBWRY_9_7(char *CmdLine);
+void EpdTestBWRY_7_4(char *CmdLine);
 
 
 int EpdTestCmd(char *CmdLine)
 {
    DisplayElapsedTime(NULL);
+//   DumpOTP_97_BWRY();
 //   EpdTestBWR_9_7(CmdLine);
-   EpdTestBWRY_9_7(CmdLine);
+//   EpdTestBWRY_9_7(CmdLine);
+   EpdTestBWRY_7_4(CmdLine);
    DisplayElapsedTime("Test took ");
 
    return RESULT_OK;
+}
+
+int EpdPinsCmd(char *CmdLine)
+{
+   uint8_t bHigh = 1;
+   int Ret = RESULT_OK;
+   bool LogPinsSave = gLogPins;
+   gLogPins = true;
+
+   if(*CmdLine == '!') {
+      bHigh = false;
+      CmdLine++;
+   }
+
+   if(*CmdLine == 0) {
+      EpdSetPins(0xff,0xff,0xff,0xff,0xff);
+   }
+   else if(strcasecmp(CmdLine,"enable") == 0) {
+   // Zero on the wire means on.
+   // The actual GPIO level varies by controller, it could be high for on
+   // or low for on
+      EpdSetEnable(bHigh ? 0 : 1);
+   }
+   else if(strcasecmp(CmdLine,"rst") == 0) {
+      EpdSetReset(bHigh);
+   }
+   else if(strcasecmp(CmdLine,"d/c") == 0) {
+      EpdSetDC(bHigh);
+   }
+   else if(strcasecmp(CmdLine,"cs") == 0) {
+      EpdSetCS(bHigh,0xff);
+   }
+   else if(strcasecmp(CmdLine,"cs1") == 0) {
+      EpdSetCS(0xff,bHigh);
+   }
+   else {
+      Ret = RESULT_USAGE;
+   }
+
+   gLogPins = LogPinsSave;
+
+   return Ret;
 }
 
 int DumpRfRegsCmd(char *CmdLine)
@@ -3382,19 +3435,28 @@ int EpdSetPins(uint8_t Enable,uint8_t Reset,uint8_t DC,uint8_t CS,uint8_t CS1)
    Cmd[3] = DC;
    Cmd[4] = CS;
    Cmd[5] = CS1;
+
+   if(Cmd[1] == 0) {
+      Cmd[1] = 1;
+   }
+   else if(Cmd[1] == 1) {
+      Cmd[1] = 0;
+   }
+
    pMsg = SendCmd(Cmd,sizeof(Cmd),2000);
    if(pMsg == NULL) {
       Ret = CMD_ERR_TIMEOUT;
    }
    else {
-      Ret = pMsg->Err;
 #if EPD_DATA_LOG
-      if(pMsg->MsgLen == 8) {
-         uint8_t *Msg = pMsg->Msg;
-         EPD_LOG("Enable %d, RST %d, D/C %d, CS %d, CS1 %d, Busy %d\n",
-                 Msg[0],Msg[1],Msg[2],Msg[3],Msg[4],Msg[5]);
-      }
+   gLogPins = true;
 #endif
+      Ret = pMsg->Err;
+      if(gLogPins && pMsg->MsgLen == 8) {
+         uint8_t *Msg = pMsg->Msg;
+         LOG_RAW("EPD PWR %s, RST %d, D/C %d, CS %d, CS1 %d, Busy %d\n",
+                 Msg[0] ? "off" : "on",Msg[1],Msg[2],Msg[3],Msg[4],Msg[5]);
+      }
       free(pMsg);
    }
 
@@ -3513,6 +3575,28 @@ AsyncResp *SendCmd(uint8_t *Cmd,int MsgLen,int Timeout)
 
 #define OTP_LEN_97_BWRY    112
 
+static void UpdateCRC(uint8_t data,uint16_t *pCrc)
+{
+   int i;
+   uint16_t res;
+
+//   printf("Updating CRC with 0x%02x 0x%04x -> ",data,*pCrc);
+
+   res = *pCrc;
+   res ^= (unsigned int) data; 
+   for(i = 0; i < 8 ; i++) {
+      if(res & 0x0001) {
+         res >>= 1;
+         res ^= 0xA001;
+      }
+      else {
+         res >>= 1;
+      }
+   }
+   *pCrc = res;   
+//   printf("0x%04x\n",*pCrc);
+}
+
 // return 0 on success
 int GetOTP_97_BWRY(uint8_t *OtpBuf)
 {
@@ -3525,9 +3609,12 @@ int GetOTP_97_BWRY(uint8_t *OtpBuf)
    int Ret = 1;   // Assume the worse
 
    do {
+      EpdSetEnable(HIGH);   // turn off power
+      EpdSetReset(LOW);
       EpdSetCS(HIGH,HIGH);
       EpdSetEnable(LOW);   // turn on power
       delay(20);
+      EpdBusyWait(0,0);    // wait for busy
       EpdSetReset(HIGH);
       delay(10);
       EpdSetReset(LOW);
@@ -3582,11 +3669,11 @@ int GetOTP_97_BWRY(uint8_t *OtpBuf)
       Cmd[CmdLen++] = CMD_EPD;
       Cmd[CmdLen++] = EPD_FLG_DEFAULT;
       Cmd[CmdLen++] = 6;
-      Cmd[CmdLen++] = 0xa2;
+      Cmd[CmdLen++] = 0xa2;   // MTP program config PGM_CFG
+      Cmd[CmdLen++] = 0x00;   // VMTPSEL 0: External VMTP
+      Cmd[CmdLen++] = 0x15;   // PGM_SADDR address 0x1500 
       Cmd[CmdLen++] = 0x00;
-      Cmd[CmdLen++] = 0x15;   // address 0x001500
-      Cmd[CmdLen++] = 0x00;
-      Cmd[CmdLen++] = 0x00;
+      Cmd[CmdLen++] = 0x00;   // PGM_DSIZE 0x00e0
       Cmd[CmdLen++] = 0xe0;   // = 112 * 2 two banks of 112 bytes
 
       if((pMsg = SendCmd(Cmd,CmdLen,2000)) == NULL || pMsg->Err) {
@@ -3598,7 +3685,7 @@ int GetOTP_97_BWRY(uint8_t *OtpBuf)
 
       CmdLen = 2;
       Cmd[CmdLen++] = 1;
-      Cmd[CmdLen++] = 0x92;
+      Cmd[CmdLen++] = 0x92;   // RMTP read MTP data
 
       if((pMsg = SendCmd(Cmd,CmdLen,2000)) == NULL || pMsg->Err) {
          break;
@@ -3625,24 +3712,43 @@ int GetOTP_97_BWRY(uint8_t *OtpBuf)
 
       if(pMsg->Msg[0] != 0xa5) {
       // Not in page 0, try page 1
-         printf("Page 0 data ignored\n");
+         printf("Page 0 data ignored:\n");
+         DumpHex(pMsg->Msg,pMsg->MsgLen);
+
 
          free(pMsg);
          if((pMsg = SendCmd(Cmd,4,2000)) == NULL || pMsg->Err) {
+            if(pMsg == NULL) {
+               printf("Timeout reading page 1 data\n");
+            }
+            else  {
+               printf("Page 1 data failed %d\n",pMsg->Err);
+            }
             break;
          }
       }
 
       if(pMsg->Msg[0] != 0xa5) {
          printf("Error: OTP data not found in page 0 or 1\n");
+         DumpHex(pMsg->Msg,pMsg->MsgLen);
       }
       else {
          if(OtpBuf != NULL) {
             memcpy(OtpBuf,pMsg->Msg,112);
+            uint16_t Crc = 0xffff;
+            for(int i = 0; i < OTP_LEN_97_BWRY; i++) {
+               UpdateCRC(OtpBuf[i],&Crc);
+            }
+
+            printf("Otp CRC 0x%04x, contents:\n",Crc);
+            DumpHex(OtpBuf,OTP_LEN_97_BWRY);
+
             Ret = 0;
          }
       }
    } while (false);
+
+   EpdSetEnable(HIGH);  // power off display
 
    if(pMsg != NULL) {
       free(pMsg);
@@ -3655,11 +3761,17 @@ void DumpOTP_97_BWRY()
 {
    uint8_t OtpBuf[OTP_LEN_97_BWRY];
    int Err;
+   memset(OtpBuf,0,sizeof(OtpBuf));
    if((Err = GetOTP_97_BWRY(OtpBuf))) {
       printf("GetOTP_97_BWRY failed %d\n",Err);
    }
    else {
-      printf("Otp contents:\n");
+      uint16_t Crc = 0xffff;
+      for(int i = 0; i < OTP_LEN_97_BWRY; i++) {
+         UpdateCRC(OtpBuf[i],&Crc);
+      }
+
+      printf("Otp CRC 0x%04x, contents:\n",Crc);
       DumpHex(OtpBuf,sizeof(OtpBuf));
    }
 }
