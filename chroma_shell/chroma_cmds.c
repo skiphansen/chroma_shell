@@ -128,7 +128,8 @@ bool gLogPins;
 #define P1_EPD_RESET    0x04
 
 // in jep106.c
-const char *JEP106_ID_2_string(uint8_t *pData,int DataLen,uint8_t *pDevId,uint16_t *pManId);
+bool JEP106_ID_2_string(uint8_t *pData,int DataLen,uint8_t *pDevId,
+                        uint16_t *pManId,const char **Desc);
 
 int BbTestCmd(char *CmdLine);
 int ChipTypeCmd(char *CmdLine);
@@ -1269,69 +1270,73 @@ int GetEEPROM_Id(bool bSilent)
 {
    int Ret = RESULT_FAIL;
    uint8_t Cmd[2] = {CMD_EEPROM_ID};
-   uint16_t ManufactureID = 0x7f;
-   uint8_t DeviceID;
-   const char *Desc;
+   uint16_t ManufID = 0;
+   uint8_t DeviceID = 0;
+   const char *Desc = NULL;
 
    AsyncResp *pMsg = SendCmd(Cmd,1,2000);
    if(pMsg != NULL) {
-      Ret = RESULT_OK;
 
-      Desc = JEP106_ID_2_string(pMsg->Msg,pMsg->MsgLen,&DeviceID,&ManufactureID);
+      if(JEP106_ID_2_string(pMsg->Msg,pMsg->MsgLen,&DeviceID,&ManufID,&Desc)) {
+         Ret = RESULT_OK;
+         if(!bSilent) {
+            printf("EEPROM Manufacture ID: 0x%02x, DeviceID: 0x%02x (%s",
+                   ManufID,DeviceID,Desc);
+            if(ManufID== 0x42) {
+               printf(" ");
+               switch(DeviceID) {
+                  case 0x10:
+                     printf("MX25V1006E, 128K");
+                     break;
 
-      if(!bSilent) {
-         printf("EEPROM Manufacture ID: 0x%02x, DeviceID: 0x%02x (%s",
-                ManufactureID,DeviceID,Desc);
-         if(ManufactureID == 0x42) {
-            printf(" ");
+                  case 0x13:
+                     printf("MX25V8006E, 1 Mbyte");
+                     break;
+
+                  default:
+                     printf("0x%02x",DeviceID);
+                     break;
+
+               }
+            }
+            else if(ManufID == 0x1f) {
+               printf(" ");
+               switch(DeviceID) {
+                  case 0x46:
+                     printf("AT25FF161A, 2 Mbytes");
+                     break;
+
+                  default:
+                     printf("0x%02x",DeviceID);
+                     break;
+
+               }
+            }
+
+            printf(") \n");
+         }
+
+         if(ManufID == 0x42) {
             switch(DeviceID) {
                case 0x10:
-                  printf("MX25V1006E, 128K");
+               // MX25V1006E, 128K
+                  gEEPROM_Len = 128 * 1024;
                   break;
 
                case 0x13:
-                  printf("MX25V8006E, 1 Mbyte");
+               // MX25V8006E, 1 Mbyte
+                  gEEPROM_Len = 1024 * 1024;
                   break;
 
                default:
-                  printf("0x%02x",DeviceID);
                   break;
-
             }
          }
-         else if(ManufactureID == 0x1f) {
-            printf(" ");
-            switch(DeviceID) {
-               case 0x46:
-                  printf("AT25FF161A, 2 Mbytes");
-                  break;
-
-               default:
-                  printf("0x%02x",DeviceID);
-                  break;
-
-            }
-         }
-
-         printf(") \n");
+      }
+      else if(Desc != NULL && !bSilent) {
+         printf("ManufID 0x%02x DeviceID %04x: %s\n",ManufID,DeviceID,Desc);
       }
 
-      if(ManufactureID == 0x42) {
-         switch(DeviceID) {
-            case 0x10:
-            // MX25V1006E, 128K
-               gEEPROM_Len = 128 * 1024;
-               break;
-
-            case 0x13:
-            // MX25V8006E, 1 Mbyte
-               gEEPROM_Len = 1024 * 1024;
-               break;
-
-            default:
-               break;
-         }
-      }
       free(pMsg);
    }
 
@@ -1397,6 +1402,8 @@ int EpdTestCmd(char *CmdLine)
 //   EpdTestBWRY_9_7(CmdLine);
    EpdTestBWRY_7_4(CmdLine);
    DisplayElapsedTime("Test took ");
+   EpdSetPins(1,0xff,0xff,0xff,0xff);  // turn off power
+
 
    return RESULT_OK;
 }

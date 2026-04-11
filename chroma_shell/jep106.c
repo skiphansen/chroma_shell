@@ -20,31 +20,38 @@ static bool CheckParity(uint8_t Data,bool bOdd)
    return bOdd == bIsOdd;
 }
 
-const char *JEP106_ID_2_string(uint8_t *pData,int DataLen,uint8_t *pDevId,uint16_t *pManId)
+bool JEP106_ID_2_string(
+   uint8_t *pData,
+   int DataLen,
+   uint8_t *pDevId,
+   uint16_t *pManId,
+   const char **Desc)
 {
-   uint8_t ManufactureID;
+   uint8_t ManufactureID = 0;
    int Bank = 0;
-   const char *Ret = "Unknown";
-   const char *ParityErr = "Invaild - parity error";
-   const char *BankErr = "Invaild - bank";
+   bool Ret = false; // Assume the worse
+   const char *RetDesc = "Unknown";
+   const char *ParityErr = "Invalid - parity error";
+   const char *BankErr = "Invalid - bank";
 
    for(int i = 0; i < DataLen; i++) {
       if((ManufactureID = pData[i]) == 0x7f) {
          Bank++;
          if(Bank > 16) {
-            Ret = BankErr;
+            RetDesc = BankErr;
             break;
          }
       }
       else {
       // found bank, check parity
          if(!CheckParity(ManufactureID,true)) {
-            Ret = ParityErr;
+            RetDesc = ParityErr;
             break;
          }
+         Ret = true;
          ManufactureID &= 0x7f;
          if(JEP106_LookupTbl[Bank][ManufactureID - 1] != NULL) {
-            Ret = JEP106_LookupTbl[Bank][ManufactureID - 1];
+            RetDesc = JEP106_LookupTbl[Bank][ManufactureID - 1];
          }
          if(pManId != NULL) {
             *pManId = ManufactureID | (Bank << 8);
@@ -54,6 +61,10 @@ const char *JEP106_ID_2_string(uint8_t *pData,int DataLen,uint8_t *pDevId,uint16
          }
          break;
       }
+   }
+
+   if(Desc != NULL) {
+      *Desc = RetDesc;
    }
 
    return Ret;
