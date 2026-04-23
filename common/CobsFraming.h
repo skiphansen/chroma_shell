@@ -14,6 +14,10 @@
 #ifndef _SERIALFRAMING_H_
 #define _SERIALFRAMING_H_
 
+#ifdef __cplusplus
+extern "C" { 
+#endif
+
 int SerialFrameIO_Init(uint8_t *RxBuf,int RxBufSize);
 int SerialFrameIO_ParseByte(uint8_t RxByte);
 void SerialFrameIO_SendMsg(uint8_t *Msg,int MsgLen);
@@ -23,6 +27,10 @@ int SerialFrameIO_CalcBufLen(int MaxMsgLen);
 
 // Provide provided by user, sends or queues a byte to be sent on serial line
 void SerialFrameIO_SendByte(uint8_t Byte);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif   // _SERIALFRAMING_H_
 
