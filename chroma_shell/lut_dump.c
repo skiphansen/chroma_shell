@@ -31,15 +31,40 @@
 #include "cc1110-ext.h"
 #include "chroma_shell.h"
 
+#define LUT_EPR0M_BASE  0x2000
+#define OFFSET_BASE     0x202a
+#define EEPROM_ERZ_SECTOR_SZ  4096  // erase size and alignment
+
+long gLutPageOffset = LUT_EPR0M_BASE;
+
 typedef struct {
    const char *CmdText;
    uint8_t CmdHex;
 } EpdCmdLut;
 
+typedef struct {
+   int8_t Temp;
+   uint16_t TableOffset;
+   uint8_t  zeros[6];
+} GCC_PACKED TempTable_t;
+
+typedef struct {
+   uint32_t InitTblOffset;
+   uint32_t TempTblOffset;
+   uint32_t VcomTblOffset;
+   uint32_t LutTblOffset;
+} GCC_PACKED BlockPoints_t;
+
+
 EpdCmdLut *gLutCmds;
+size_t gScriptSize = 0x2000;
 
 const uint8_t gLutSignature[] = {0xce,0xfa,0xef,0xbe};   // "beefface"
 void LutCompare(uint8_t *pData,int DataLen);
+void DumpCmdTbl(uint32_t Offset,size_t gScriptSize);
+void DumpTempTable(uint32_t Offset);
+void PrintDivider(void);
+bool ValidOffset(uint32_t Offset);
 
 
 // 400 x 300 x 2
@@ -305,7 +330,7 @@ EpdCmdLut g8151_cmd_lookup[] = {
    {NULL}     // end of table
 };
 
-uint8_t gScript[0x4000];
+uint8_t gScript[0x10000];
 
 void LogEpdCmd(uint8_t Cmd)
 {
@@ -328,12 +353,10 @@ int DumpLutCmd(char *CmdLine)
 {
    FILE *fp = NULL;
    int Ret = RESULT_FAIL; // assume the worse
-   uint64_t NewOffset;
-   uint64_t Offset = 0;
-   long LutPageOffset = 0x2000;
+   uint32_t NewOffset;
+   uint32_t Offset = 0;
    int LutNum = 1;
    uint64_t Skip1;
-   size_t ScriptSize = 0x2000;
    uint8_t LutVerMajor;
    uint8_t LutVerMinor;
 
@@ -346,69 +369,39 @@ int DumpLutCmd(char *CmdLine)
          break;
       }
 
-      if(*CmdLine) {
-         if((fp = fopen(CmdLine,"r")) == NULL) {
-            LOG("fopen(\"%s\") failed - %s\n",CmdLine,strerror(errno));
-            break;
-         }
-         if(fseek(fp,LutPageOffset,SEEK_SET)) {
-            printf("fseek failed - %s\n",strerror(errno));
-            break;
-         }
-         if(fread(gScript,ScriptSize,1,fp) != 1) {
-            printf("fread failed - %s\n",strerror(errno));
-            break;
-         }
-      }
-// TODO: add support for reading from flash
-
-      if(memcmp(gScript,gLutSignature,sizeof(gLutSignature)) != 0) {
-         printf("LUT signature not found at offset 0x%lx\n",LutPageOffset);
-         DumpHex(gScript,sizeof(gLutSignature));
-         break;
-      }
-      Ret = RESULT_OK; // assume good things for now
-      Offset += 4;
-      LutVerMajor = gScript[Offset];
-      LutVerMinor = gScript[Offset+1];
-      printf("LUT version %d.%d\n",LutVerMajor,LutVerMinor);
-      Offset += 2;
-
-      printf("LUT label '%-30s'\n",&gScript[Offset]);
-
       switch(gChromaType) {
          case CHROMA42_R:
          case CHROMA42_Y:
             gLutCmds = g8176_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
             Skip1 = 0x51;
             break;
 
          case CHROMA74_R:
          case CHROMA74_Y:
             gLutCmds = g8159_cmd_lookup;
-            ScriptSize = 0x4000;
+            gScriptSize = 0x4000;
             Skip1 = 0x51;
             break;
 
          case CHROMA21_R:
          case CHROMA21_Y:
             gLutCmds = g8154_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
             Skip1 = 0xb5;
-            Ret = RESULT_NO_SUPPORT;
             break;
 
          case CHROMA29C_R:
             gLutCmds = g8151_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
             Skip1 = 0x51;
             break;
 
          case CHROMA29_R:
          case CHROMA29_Y:
             gLutCmds = g8154_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
+#if 0
             if(LutVerMajor != 3) {
                Ret = RESULT_NO_SUPPORT;
                break;
@@ -426,25 +419,72 @@ int DumpLutCmd(char *CmdLine)
                   Ret = RESULT_NO_SUPPORT;
                   break;
             }
+#endif
             break;
 
          case CHROMA29_CC1310_R:
          case CHROMA29_CC1310_Y:
             gLutCmds = g1675_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
             Skip1 = 0x50;
             break;
 
          case CHROMA21_CC1310_R:
             gLutCmds = g8176_cmd_lookup;
-            ScriptSize = 0x1000;
+            gScriptSize = 0x1000;
             Skip1 = 0x50;
             break;
 
+         case CHROMA60_R:
+            gLutCmds = g8159_cmd_lookup;
+            gScriptSize = 0x4000;
+            Skip1 = 0x54;
+            break;
+
          default:
-            LOG("Board type not defined\b");
+            LOG("Board type not defined\n");
             break;
       }
+
+      if(*CmdLine) {
+         if((fp = fopen(CmdLine,"r")) == NULL) {
+            LOG("fopen(\"%s\") failed - %s\n",CmdLine,strerror(errno));
+            break;
+         }
+         if(fread(gScript,LUT_EPR0M_BASE + gScriptSize,1,fp) != 1) {
+            printf("fread failed - %s\n",strerror(errno));
+            break;
+         }
+         printf("Read %ld bytes:\n",gScriptSize);
+//       DumpHexAdr(gScript,gScriptSize,0x2000);
+
+      }
+// TODO: add support for reading from flash
+
+      bool bMagicFound = false;
+      for(int Page = 0; Offset < sizeof(gScript); Page++) {
+         Offset = Page * EEPROM_ERZ_SECTOR_SZ;
+         if(memcmp(&gScript[Offset],gLutSignature,sizeof(gLutSignature)) == 0) {
+            printf("LUT signature found at offset 0x%x\n",Offset);
+            bMagicFound = true;
+            break;
+         }
+      }
+
+      if(!bMagicFound) {
+         printf("LUT signature not found\n");
+         break;
+      }
+
+
+      Offset += 4;
+// Order assumed based on Chroma42 with desc "P16Y00.63 V3 UC8176 42E4"
+      LutVerMajor = gScript[Offset];
+      LutVerMinor = gScript[Offset+1];
+      printf("LUT version %d.%d\n",LutVerMajor,LutVerMinor);
+      Offset += 2;
+      printf("LUT label '%-27s'\n",&gScript[Offset]);
+      Offset += 27;
 
       if(Ret == RESULT_NO_SUPPORT) {
          printf("LUT version %d.%d is not supported, aborting.\n",
@@ -456,10 +496,48 @@ int DumpLutCmd(char *CmdLine)
          break;
       }
 
-      Offset += 30;
 // The first 69 (0x45) bytes @ offset 4 appear to be a header since
 // it is read at boot (logic analyzer trace) so the first non-header
 // byte is @ 0x04 + 0x45 = 0x049
+
+// Skip 9 butes @ 0x2021 that we don't understand
+      Offset += 9;
+// <offset base: 202a>
+      BlockPoints_t *pBlocks = (BlockPoints_t *) &gScript[Offset];
+      Offset = OFFSET_BASE + pBlocks->InitTblOffset;
+      PrintDivider();
+      printf("InitTblOffset: 0x%x:\n",Offset);
+      if(!ValidOffset(Offset)) {
+         break;
+      }
+      DumpCmdTbl(Offset,gScriptSize); 
+
+      Offset = OFFSET_BASE + pBlocks->TempTblOffset;
+      PrintDivider();
+      printf("TempTblOffset: 0x%x\n",Offset);
+      if(!ValidOffset(Offset)) {
+         break;
+      }
+      DumpTempTable(Offset);
+
+      PrintDivider();
+      Offset = OFFSET_BASE + pBlocks->VcomTblOffset;
+      printf("VcomTblOffset: 0x%x\n",Offset);
+      if(!ValidOffset(Offset)) {
+         break;
+      }
+      DumpCmdTbl(Offset,gScriptSize); 
+
+      PrintDivider();
+      Offset = OFFSET_BASE + pBlocks->LutTblOffset;
+      printf("LutTblOffset: 0x%x\n",Offset);
+      if(!ValidOffset(Offset)) {
+         break;
+      }
+      DumpCmdTbl(Offset,gScriptSize); 
+      Ret = RESULT_OK;
+      break;
+
       NewOffset = Skip1;
       while(Offset < sizeof(gScript)) {
          uint8_t Opcode = gScript[Offset];
@@ -469,27 +547,27 @@ int DumpLutCmd(char *CmdLine)
             if(Offset != NewOffset ) {
                uint64_t SkipLen = NewOffset - Offset;
                printf("skipping from offset 0x%lx to 0x%lx (%ld/0x%lx bytes)\n",
-                      Offset + LutPageOffset,NewOffset + LutPageOffset,
+                      Offset + gLutPageOffset,NewOffset + gLutPageOffset,
                       SkipLen,SkipLen);
                DumpHex(&gScript[Offset],SkipLen);
                printf("\n");
                Offset = NewOffset;
             }
             else {
-               printf("parsing continuing at offset 0x%lx\n",Offset + LutPageOffset);
+               printf("parsing continuing at offset 0x%lx\n",Offset + gLutPageOffset);
             }
             NewOffset = 0;
             continue;
          }
 #if 0
-         if(Offset + DataLen > ScriptSize) {
+         if(Offset + DataLen > gScriptSize) {
             printf("Invalid DataLen %d, aborting.\n",DataLen);
             break;
          }
 #endif
 
 #if 0
-         printf("0x%lx:\n",Offset + LutPageOffset);
+         printf("0x%lx:\n",Offset + gLutPageOffset);
          printf("Opcode 0x%x, DataLen %d: ",Opcode,DataLen);
          if(DataLen > 0) {
             DumpHex(&gScript[Offset+3],DataLen);
@@ -522,18 +600,17 @@ int DumpLutCmd(char *CmdLine)
             continue;
          }
 
-         printf("\n");
+         printf("\n@0x%04x: ",Offset);
          switch(Opcode) {
             case 0x00:
-               printf("opcode 0: end of sequence @ 0x%lx\n",
-                      LutPageOffset + Offset);
+               printf("end of sequence @ 0x%lx\n",gLutPageOffset + Offset);
                break;
 
-            case 0x01:  // Send command and data to 
+            case 0x01:  // Send command and data t3o 
                if(gChromaType == CHROMA42_R || gChromaType == CHROMA42_Y) {
                   if(gScript[Offset+3] == 0x01) {
                      printf("Start of LUT #%d @ 0x%lx\n\n",
-                            LutNum++,LutPageOffset + Offset);
+                            LutNum++,gLutPageOffset + Offset);
                   }
                }
                LogEpdCmd(gScript[Offset+3]);
@@ -542,7 +619,7 @@ int DumpLutCmd(char *CmdLine)
                      printf(" %d (0x%x) bytes of data:",
                             DataLen-1,DataLen-1);
                   }
-                  if(DataLen + Offset > ScriptSize) {
+                  if(DataLen + Offset > gScriptSize) {
                      printf("\nInvalid data Len %d, aborting.\n",DataLen);
                      Ret = RESULT_FAIL;
                      break;
@@ -576,19 +653,36 @@ int DumpLutCmd(char *CmdLine)
                printf("opcode 7: Send data to display\n");
                break;
 
+            case 0x19:
+               printf("opcode 0x19: temperature table:\n");
+               TempTable_t *pTempTbl = (TempTable_t *)  &gScript[Offset];
+
+               while(true) {
+                  if(pTempTbl->Temp == -100) {
+                     printf("  End of temperature tables @ 0x%x\n",
+                            OFFSET_BASE + pTempTbl->TableOffset);
+                     break;
+                  }
+                  printf("  %d C @ 0x%x\n",pTempTbl->Temp,
+                         OFFSET_BASE + pTempTbl->TableOffset);
+                  pTempTbl++;
+               }
+               break;
+
             case 0xff:
-               printf("End of LUTs at offset 0x%lx\n",LutPageOffset + Offset);
+               printf("End of LUTs at offset 0x%lx\n",gLutPageOffset + Offset);
                Offset = sizeof(gScript);
                break;
 
             default:
                if(DataLen > 1) {
-                  printf("Opcode 0x%x at offset 0x%lx with %d bytes of data ignored:\n",
+                  printf("Unknown Opcode 0x%x at offset 0x%x with %d bytes of data ignored:\n",
                          Opcode,Offset,DataLen - 1);
-                  DumpHexAdr(&gScript[Offset],DataLen - 1,Offset+LutPageOffset);
+                  DumpHexAdr(&gScript[Offset],DataLen - 1,Offset+gLutPageOffset);
                }
                else {
-                  printf("Opcode 0x%x at offset 0x%lx ignored\n",Opcode,Offset);
+                  printf("Unknown Opcode  0x%x at offset 0x%x ignored\n",
+                         Opcode,Offset);
                }
                break;
          }
@@ -597,27 +691,31 @@ int DumpLutCmd(char *CmdLine)
          }
          Offset += 3;
       }
-      printf("page offset 0x%lx\n",LutPageOffset + Offset);
+      printf("page offset 0x%lx\n",gLutPageOffset + Offset);
    } while(false);
 
    if(fp != NULL) {
       fclose(fp);
    }
 
-   if(Ret != RESULT_OK) {
+   if(Ret == RESULT_NO_SUPPORT) {
       int i = 0;
       printf("%s failed to parse\n",gSn != NULL ? gSn : CmdLine);
-      for(i = ScriptSize - 1; i > 0; i--) {
-         if(gScript[i] != 0xff) {
+      for(i = gScriptSize - 1; i > 0; i--) {
+         if(gScript[gLutPageOffset + i] != 0xff) {
+            i++;
             break;
          }
       }
       printf("Dump:\n");
-      DumpHexAdr(gScript,i+1,LutPageOffset);
+
+      for(int j = 0; j < i; j += 16) {
+         DumpHexAdr(&gScript[gLutPageOffset + j],16,gLutPageOffset + j);
+      }
       printf("\n");
       Ret = RESULT_FAIL;
    }
-   else {
+   else if(Ret == RESULT_OK) {
       printf("%s parsed successfully.\n\n",gSn);
    }
 
@@ -636,5 +734,141 @@ void LutCompare(uint8_t *pData,int DataLen)
       }
       p += *p + 1;
    }
+}
+
+void DumpCmdTbl(uint32_t Offset,size_t gScriptSize)
+{
+   bool bLoop = true;
+
+   while(bLoop) {
+      uint8_t Opcode = gScript[Offset];
+      int DataLen = (gScript[Offset+2] << 8) + gScript[Offset + 1];
+
+#if 0
+      if(Offset + DataLen > gScriptSize) {
+         printf("Invalid DataLen %d, aborting.\n",DataLen);
+         break;
+      }
+#endif
+
+#if 0
+      printf("0x%lx:\n",Offset + gLutPageOffset);
+      printf("Opcode 0x%x, DataLen %d: ",Opcode,DataLen);
+      if(DataLen > 0) {
+         DumpHex(&gScript[Offset+3],DataLen);
+      }
+      printf("\n");
+#endif
+
+      printf("\n@0x%04x: ",Offset);
+      switch(Opcode) {
+         case 0x00:
+            printf("End of sequence @ 0x%x\n",Offset);
+            bLoop = false;
+            break;
+
+         case 0x01:  // Send command and data t3o 
+            LogEpdCmd(gScript[Offset+3]);
+            if(DataLen > 1) {
+               if(DataLen > 8) {
+                  printf(" %d (0x%x) bytes of data:",
+                         DataLen-1,DataLen-1);
+               }
+               if(DataLen + Offset > gScriptSize) {
+                  printf("\nInvalid data Len %d, aborting.\n",DataLen);
+                  bLoop = false;
+                  break;
+               }
+               else {
+                  LutCompare(&gScript[Offset+3],DataLen);
+                  printf("\n");
+                  DumpHexSrc(&gScript[Offset+4],DataLen - 1);
+               }
+            }
+            Offset += DataLen;
+            break;
+
+         case 0x3:
+            printf("opcode 3: wait for busy to go high\n");
+            break;
+
+         case 0x4:
+            printf("opcode 4: write %d (0x%x) bytes of zeros to ",
+                   DataLen-1,DataLen-1);
+            LogEpdCmd(gScript[Offset+3]);
+            printf("\n");
+            Offset++;
+            break;
+
+         case 0x5:
+            printf("opcode 5: wait for busy to go low\n");
+            break;
+
+         case 0x7:
+            printf("opcode 7: Send data to display\n");
+            break;
+
+         case 0x19:
+            printf("opcode 0x19: temperature table:\n");
+            TempTable_t *pTempTbl = (TempTable_t *)  &gScript[Offset];
+
+            while(true) {
+               if(pTempTbl->Temp == -100) {
+                  printf("  End of temperature tables @ 0x%x\n",
+                         OFFSET_BASE + pTempTbl->TableOffset);
+                  break;
+               }
+               printf("  %d C @ 0x%x\n",pTempTbl->Temp,
+                      OFFSET_BASE + pTempTbl->TableOffset);
+               pTempTbl++;
+            }
+            break;
+
+         default:
+            if(DataLen > 1) {
+               printf("Opcode 0x%x at offset 0x%x with %d bytes of data ignored:\n",
+                      Opcode,Offset,DataLen - 1);
+               DumpHexAdr(&gScript[Offset],DataLen - 1,Offset+gLutPageOffset);
+            }
+            else {
+               printf("Opcode 0x%x at offset 0x%x ignored\n",Opcode,Offset);
+            }
+            break;
+      }
+      Offset += 3;
+   }
+}
+
+void DumpTempTable(uint32_t Offset)
+{
+   int TableNum = 0;
+   TempTable_t *pTempTbl = (TempTable_t *)  &gScript[Offset];
+
+   while(true) {
+      if(pTempTbl->Temp == -100) {
+         printf("End of temperature tables @ 0x%x\n",
+                OFFSET_BASE + pTempTbl->TableOffset);
+         break;
+      }
+      printf("LUT table %d for  %d C @ 0x%x:\n",TableNum++,pTempTbl->Temp,
+             OFFSET_BASE + pTempTbl->TableOffset);
+      DumpCmdTbl(OFFSET_BASE + pTempTbl->TableOffset,gScriptSize); 
+      printf("\n");
+      pTempTbl++;
+   }
+}
+
+void PrintDivider()
+{
+   printf("\n-------------------------\n");
+}
+
+bool ValidOffset(uint32_t Offset)
+{
+   bool Ret = Offset < gLutPageOffset + gScriptSize;
+   if(!Ret) {
+      printf("Offset 0x%x is invalid\n",Offset);
+   }
+   return Ret;
 }
 

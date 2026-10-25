@@ -1,11 +1,11 @@
 #/bin/bash
 # dump all eeprom images
 
-# set -x
+#set -x
 
-dumpfile=logs/all_luts.lst
+dumpfile=lut_dumps/all_luts.lst
 
-eeproms=`find . -name "*eeprom.bin"`
+eeproms=`find eeprom_backups -name "*eeprom.bin"`
 
 rm $dumpfile
 for file in $eeproms; do
