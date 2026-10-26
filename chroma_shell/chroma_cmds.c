@@ -1861,6 +1861,10 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
             Msg = "ADC slope";
             break;
 
+         case 0x14:  // Display Resolution
+            Msg = "Display Resolution";
+            break;
+              
          case 0x23:  // VCOM
             Msg = "VCOM";
             break;
@@ -1957,6 +1961,13 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
                }
                break;
             }
+
+            case 0x14:  // Display Resolution
+               LOG_RAW("Resolution %d x %d\nUnknown Bytes ",
+                       Data[Offset + 2] + (Data[Offset + 3] << 8),
+                       Data[Offset + 4] + (Data[Offset + 5] << 8));
+               DumpHex(&Data[Offset + 6],Len-6);
+               break;
 
             default:
                if(!bSilent) {
