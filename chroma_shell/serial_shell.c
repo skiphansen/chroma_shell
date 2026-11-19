@@ -71,7 +71,7 @@ bool OpenSerialPort(const char *Device,int Baudrate);
 bool SendSerialData(uint8_t *Buf,int Len);
 int RecvSerialData(uint8_t *Buf,int BufLen);
 static void PrintHeader(void);
-int MainLoop(void);
+int MainLoop(bool bUseSerial);
 static struct COMMAND_TABLE *FindCmd(char *CmdLine,int bSilent);
 void ParseCmd(char *CmdLine);
 int MatchCmd(char *CmdLine, char *Command);
@@ -143,6 +143,7 @@ int main(int argc, char* argv[])
    int Option;
    int bExit = false;
    char *ImmediateCommand = NULL;
+   bool bUseSerial = false;
 
 
 // Set default device on Linux
@@ -208,14 +209,18 @@ int main(int argc, char* argv[])
          printf("Error: device path not specified (-D <device path>)\n");
          break;
       }
-      if(!OpenSerialPort(gDevicePath,gSerialBaudrate)) {
-         break;
+      if(strcmp(gDevicePath,"none") != 0) {
+         bUseSerial = true;
+
+         if(!OpenSerialPort(gDevicePath,gSerialBaudrate)) {
+            break;
+         }
+         gMaxMsgLen = SerialFrameIO_Init(RxBuf,sizeof(RxBuf)-1);
       }
-      gMaxMsgLen = SerialFrameIO_Init(RxBuf,sizeof(RxBuf)-1);
       linenoiseHistoryLoad(GetHistoryPath());
       linenoiseSetCompletionCallback(TabCompletion);
       if(ImmediateCommand == NULL) {
-         MainLoop();
+         MainLoop(bUseSerial);
       }
       else {
          RunOneCommand(ImmediateCommand);
@@ -272,7 +277,7 @@ int ConCB(const char *CmdLine)
 
 
 // forever loop
-int MainLoop()
+int MainLoop(bool bUseSerial)
 {
    int Ret;
    AsyncMsg *pMsg;
@@ -293,8 +298,15 @@ int MainLoop()
          linenoiseShow(&gLs);
       }
 
-      if((Ret = WaitEvent(100,ConCB,ProcessSerialData)) < 0) {
-         break;
+      if(bUseSerial) {
+         if((Ret = WaitEvent(100,ConCB,ProcessSerialData)) < 0) {
+            break;
+         }
+      }
+      else {
+         if((Ret = WaitEvent(100,ConCB,NULL)) < 0) {
+            break;
+         }
       }
 
       if((pMsg = gMsgQueueHead) != NULL) {

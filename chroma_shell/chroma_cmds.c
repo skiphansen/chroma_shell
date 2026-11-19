@@ -1853,6 +1853,10 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
             Msg = "EPD SN";
             break;
 
+         case 0x6:   // RfConfig
+            Msg = "RfConfig";
+            break;
+
          case 0x9:  // ADC intercept
             Msg = "ADC intercept";
             break;
@@ -1865,6 +1869,14 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
             Msg = "Display Resolution";
             break;
               
+         case 0x13:
+            Msg = "wake-up override channel";
+            break;
+
+         case 0x15:
+            Msg = "Data Rate index";
+            break;
+
          case 0x23:  // VCOM
             Msg = "VCOM";
             break;
@@ -1961,6 +1973,41 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
                }
                break;
             }
+            case 0x6:  {
+            // RfConfig
+               uint8_t ID = Data[Offset + 2 + 0xa];
+               LOG_RAW("ID: %d (0x%02x)\n",ID,ID);
+               break;
+            }
+
+            case 0x15: { // Data Rate index
+               const char *Rate = NULL;
+               uint8_t Index = Data[Offset+2];
+
+            // data-rate index: 0 = 38.4 kBaud,  1 = 76.8, 2 = 100.
+               switch(Index) {
+                  case 0:
+                     Rate = "38.4";
+                     break;
+
+                  case 1:
+                     Rate = "76.8";
+                     break;
+
+                  case 2:
+                     Rate = "100";
+                     break;
+               }
+
+               if(Rate != NULL) {
+                  LOG_RAW("Data rate: %s kBaud\n",Rate);
+               }
+               else {
+                  LOG_RAW("Unknown data rate, index = 0x%x\n",Index);
+               }
+            }
+            break;
+
 
             case 0x14:  // Display Resolution
                LOG_RAW("Resolution %d x %d\nUnknown Bytes ",
