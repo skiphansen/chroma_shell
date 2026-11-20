@@ -1799,6 +1799,22 @@ int SetTx(float mhz)
    return Ret;
 }
 
+#define REGION_US    0x3f
+#define REGION_EU    0x40
+
+typedef struct {
+   uint8_t  ChanSlots[8];
+   uint8_t  Unknown;
+   uint8_t  NetID;
+   uint16_t DisplayID;
+   uint8_t  Slots;
+   uint16_t SlotTime;                //
+   uint16_t GroupID;                //
+   uint16_t MsgLenAp2Tag;                //
+   uint8_t  SyncPeriods;
+   uint8_t  Region;
+   uint32_t  ExtendedSleepTime;
+} GCC_PACKED FactoryRfConf;
 
 int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
 {
@@ -1975,10 +1991,32 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
             }
             case 0x6:  {
             // RfConfig
-               uint8_t *p = &Data[Offset + 2 + 0xa];
-               uint16_t ID = *p + (p[1] << 8);
-               LOG_RAW("ID: %d (0x%02x)\n",ID,ID);
-               DumpHex(&Data[Offset],Len-2);
+               DumpHex(&Data[Offset],Len);
+               FactoryRfConf *p = (FactoryRfConf *) &Data[Offset + 2];
+               LOG_RAW("Region: ");
+               switch(p->Region) {
+                  case REGION_US:
+                     LOG_RAW("US\n");
+                     break;
+
+                  case REGION_EU:
+                     LOG_RAW("EU\n");
+                     break;
+
+                  default:
+                     LOG_RAW("unknown 0x%02x\n",p->Region);
+                     break;
+               }
+               LOG_RAW("Net ID: %d (0x%02x)\n",p->NetID,p->NetID);
+               LOG_RAW("ID: %d (0x%02x)\n",p->DisplayID,p->DisplayID);
+               LOG_RAW("Slots: %d\n",p->Slots);
+               LOG_RAW("Slots time: %d\n",p->SlotTime);
+               LOG_RAW("Group ID: %d\n",p->GroupID);
+               LOG_RAW("MsgLen: %d\n",p->MsgLenAp2Tag);
+               LOG_RAW("SyncPeriods: %d\n",p->SyncPeriods);
+               LOG_RAW("Sleep time: %d ms\n",p->ExtendedSleepTime);
+               LOG_RAW("ChanSlots: ");
+               LOG_RAW("Unknown byte %d (0x%02x)\n",p->Unknown);
                break;
             }
 
