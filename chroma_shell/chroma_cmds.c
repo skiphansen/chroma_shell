@@ -1975,8 +1975,10 @@ int DumpOldSettings(uint8_t *Data,int Adr,bool bSilent)
             }
             case 0x6:  {
             // RfConfig
-               uint8_t ID = Data[Offset + 2 + 0xa];
+               uint8_t *p = &Data[Offset + 2 + 0xa];
+               uint16_t ID = *p + (p[1] << 8);
                LOG_RAW("ID: %d (0x%02x)\n",ID,ID);
+               DumpHex(&Data[Offset],Len-2);
                break;
             }
 
